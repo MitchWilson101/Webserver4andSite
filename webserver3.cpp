@@ -163,130 +163,16 @@ void handle_client(int client_socket) {
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: " + content_type + "\r\n"
         "Content-Length: " + std::to_string(file_content.size()) + "\r\n"
-        "X-Frame-Options: DENY\r\n"
+        "X-Frame-Options: ALLOW\r\n"
         "X-Content-Type-Options: nosniff\r\n"
         "\r\n" + file_content;
-
+    // change X-Fram-Options: ALLOW/DENY. Switch to DENY to stop people posting dodgey websites. 
+    
     // Send the response
     send(client_socket, http_response.c_str(), http_response.size(), 0);
     close(client_socket);
 }
 
-
-
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-/*void handle_client(int client_socket) {
-    char buffer[1024] = {0};
-    read(client_socket, buffer, 1024);
-    std::string request(buffer);
-
-    // Verify the request contains "GET /"
-    size_t start = request.find("GET /");
-    if (start == std::string::npos) {
-        // Handle the malformed request gracefully
-        const char* bad_request_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n<h1>400 Bad Request</h1>";
-        send(client_socket, bad_request_response, strlen(bad_request_response), 0);
-        close(client_socket);
-        return;
-    }
-
-
-// Extract the requested path from the request
-    start += 5; // Position after "GET /"
-    size_t end = request.find(" ", start);
-    std::string request_path = request.substr(start, end - start);
-
-    // Sanitize the path to prevent directory traversal
-    request_path = sanitize_path(request_path);
-    
-
-    // Default to index.html if the path is empty
-    std::string file_path;
-    if (request_path.empty() || request_path == "/") {
-        file_path = "public/index.html";
-    } else {
-        file_path = "public/" + request_path;
-    }
-
-   // Debugging output to check paths
-    std::cout << "Request Path: " << request_path << std::endl;
-    std::cout << "Constructed File Path: " << file_path << std::endl;
-
-  // Check if the file exists and is a regular file
-    if (!is_file(file_path)) {
-        // 404 Not Found response if the file is missing or if it's a directory
-        const char* not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>404 Not Found</h1>";
-        send(client_socket, not_found_response, strlen(not_found_response), 0);
-        close(client_socket);
-        return;
-    }
-
-    // Default to index.html if the path is empty
-    if (request_path.empty()) {
-        file_path = "public/index.html";
-    } else {
-        // Construct the full file path based on the request
-        file_path = "public/" + request_path;
-    }
-     
-     // Debugging output to trace the file path
-    std::cout << "Attempting to read file: " << file_path << std::endl;
-
-
-
-    // Check if the file exists
-    if (!file_exists(file_path)) {
-        // 404 Not Found response
-        const char* not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>404 Not Found</h1>";
-        send(client_socket, not_found_response, strlen(not_found_response), 0);
-        close(client_socket);
-        return;
-    }
-
-    // Read the file content
-    std::string file_content = read_file(file_path);
-    if (file_content.empty()) {
-        // 404 Not Found response if the file is empty or not readable
-        const char* not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>404 Not Found</h1>";
-        send(client_socket, not_found_response, strlen(not_found_response), 0);
-        close(client_socket);
-        return;
-    }
-
-    // Determine Content-Type based on file extension
-    std::string content_type;
-    if (file_path.find(".html") != std::string::npos) {
-        content_type = "text/html";
-    } else if (file_path.find(".css") != std::string::npos) {
-        content_type = "text/css";
-    } else if (file_path.find(".js") != std::string::npos) {
-        content_type = "application/javascript";
-    } else if (file_path.find(".png") != std::string::npos) {
-        content_type = "image/png";
-    } else if (file_path.find(".jpg") != std::string::npos || file_path.find(".jpeg") != std::string::npos) {
-        content_type = "image/jpeg";
-    } else {
-        content_type = "application/octet-stream"; // Default for unknown types
-    }
-
-    // Build the HTTP response
-    std::string http_response = 
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: " + content_type + "\r\n"
-        "Content-Length: " + std::to_string(file_content.size()) + "\r\n"
-        "X-Frame-Options: DENY\r\n"
-        "X-Content-Type-Options: nosniff\r\n"
-        "\r\n" + file_content;
-
-    // Send the response
-    send(client_socket, http_response.c_str(), http_response.size(), 0);
-    close(client_socket);
-}*/
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void handle_signal(int signal) {
     std::cout << "Shutting down server...\n";
