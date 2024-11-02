@@ -122,20 +122,46 @@ void handle_client(int client_socket) {
     bool is_get = request.find("GET ") == 0;
     bool is_post = request.find("POST ") == 0;
 
-    // Extract path and query
-    size_t path_start = is_get ? 4 : 5;  // "GET /" vs "POST /"
+    // Check for valid request type
+    if (!is_get && !is_post) {
+        const char* bad_request_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n<h1>400 Bad Request</h1>";
+        send(client_socket, bad_request_response, strlen(bad_request_response), 0);
+        close(client_socket);
+        return;
+    }
+
+    // Extract path and query safely
+    size_t path_start = is_get ? 4 : 5;  // Position after "GET /" or "POST /"
     size_t path_end = request.find(" ", path_start);
+    
+    // Check if path_end is valid
+    if (path_end == std::string::npos) {
+        const char* bad_request_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n<h1>400 Bad Request</h1>";
+        send(client_socket, bad_request_response, strlen(bad_request_response), 0);
+        close(client_socket);
+        return;
+    }
+
     std::string request_path = request.substr(path_start, path_end - path_start);
 
     // Set default file path
     std::string file_path = "public/" + request_path;
 
+    // Check if file_path is a directory and default to "index.html" if it is
+    struct stat path_stat;
+    if (stat(file_path.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
+        file_path += "/index.html";  // Append index.html if path is a directory
+    }
+
     // Handle POST data extraction
     std::string post_data;
     if (is_post) {
-        // Find the start of the POST body
-        size_t post_data_start = request.find("\r\n\r\n") + 4;
-        post_data = request.substr(post_data_start);
+        // Find the start of the POST body safely
+        size_t post_data_start = request.find("\r\n\r\n");
+        if (post_data_start != std::string::npos) {
+            post_data_start += 4; // Move past the "\r\n\r\n"
+            post_data = request.substr(post_data_start);
+        }
     }
 
     // Check if it's a PHP file
@@ -151,7 +177,13 @@ void handle_client(int client_socket) {
             response_content = execute_php(file_path, "");
         }
     } else {
-        // Handle static files
+        // Handle static files and check if the file exists
+        if (!is_file(file_path)) {
+            const char* not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>404 Not Found</h1>";
+            send(client_socket, not_found_response, strlen(not_found_response), 0);
+            close(client_socket);
+            return;
+        }
         response_content = read_file(file_path);
         if (file_path.find(".html") != std::string::npos) content_type = "text/html";
         else if (file_path.find(".css") != std::string::npos) content_type = "text/css";
@@ -172,6 +204,8 @@ void handle_client(int client_socket) {
     send(client_socket, http_response.c_str(), http_response.size(), 0);
     close(client_socket);
 }
+
+
 
 
 /* old php added.////////////////////////////////////////////////////////////////////////////////////////////
