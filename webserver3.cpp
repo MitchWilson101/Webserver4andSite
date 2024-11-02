@@ -8,6 +8,7 @@
 #include <csignal>
 #include <sstream>
 #include <sys/stat.h>
+#include <cstdio>
 
 int server_socket;
 bool keep_running = true;
@@ -38,6 +39,35 @@ bool is_file(const std::string& path) {
 }
 
 
+// To test php on server.
+    std::string execute_php(const std::string& file_path) {
+    std::string command = "php-cgi " + file_path;
+    std::string result;
+    char buffer[128];
+
+    // Open a pipe to run the command and capture its output
+    FILE* pipe = popen(command.c_str(), "r");
+    if (!pipe) {
+        return "<h1>500 Internal Server Error</h1>";
+    }
+
+    // Skip the first line (the "Content-type" header line)
+    bool is_first_line = true;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        if (is_first_line && std::string(buffer).find("Content-type:") != std::string::npos) {
+            is_first_line = false;  // Skip this line
+            continue;
+        }
+        result += buffer;
+    }
+
+    // Close the pipe
+    pclose(pipe);
+    return result;
+}
+
+
+
 
 bool is_internal_ip(const std::string& host) {
     // Block metadata IP 169.254.169.254
@@ -46,6 +76,8 @@ bool is_internal_ip(const std::string& host) {
     }
     return false;
 }
+
+
 // Function to check if a file exists
 bool file_exists(const std::string& path) {
     struct stat buffer;
@@ -79,6 +111,8 @@ std::string get_host_from_request(const std::string& request) {
     return "";
 }
 
+
+
 void handle_client(int client_socket) {
     char buffer[1024] = {0};
     read(client_socket, buffer, 1024);
@@ -94,80 +128,50 @@ void handle_client(int client_socket) {
         return;
     }
 
-    // Extract the requested path, ignoring any query parameters
-    start += 5; // Position after "GET /"
+    // Extract the requested path and ignore any query parameters
+    start += 5;
     size_t end = request.find(" ", start);
     std::string request_path = request.substr(start, end - start);
+    
+    // Determine the file path based on the request
+    std::string file_path = "public/" + request_path;
 
-    // Remove query string if present
-    size_t query_pos = request_path.find("?");
-    if (query_pos != std::string::npos) {
-        request_path = request_path.substr(0, query_pos);
-    }
+    // Check if the file is a PHP script
+    bool is_php = file_path.find(".php") != std::string::npos;
+    std::string response_content;
+    std::string content_type = "text/html";  // Default Content-Type for PHP output
 
-    // Sanitize the path to prevent directory traversal or remote file inclusion
-    request_path = sanitize_path(request_path);
-
-    // Determine the file path based on the sanitized request path
-    std::string file_path;
-    if (request_path.empty() || request_path == "/") {
-        file_path = "public/index.html";
+    if (is_php) {
+        // Execute PHP and get the output
+        response_content = execute_php(file_path); // Run PHP code using php-cgi
     } else {
-        file_path = "public/" + request_path;
-    }
-
-    // Ensure that file_path does not end in a slash
-    if (file_path.back() == '/') {
-        file_path += "index.html";  // Default to index.html if path points to a directory
-    }
-
-    // Debugging output to trace the file path
-    std::cout << "Request Path: " << request_path << std::endl;
-    std::cout << "Constructed File Path: " << file_path << std::endl;
-
-    // Check if the file exists and is a regular file
-    if (!is_file(file_path)) {
-        const char* not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>404 Not Found</h1>";
-        send(client_socket, not_found_response, strlen(not_found_response), 0);
-        close(client_socket);
-        return;
-    }
-
-    // Read the file content
-    std::string file_content = read_file(file_path);
-    if (file_content.empty()) {
-        const char* not_found_response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>404 Not Found</h1>";
-        send(client_socket, not_found_response, strlen(not_found_response), 0);
-        close(client_socket);
-        return;
-    }
-
-    // Determine Content-Type based on file extension
-    std::string content_type;
-    if (file_path.find(".html") != std::string::npos) {
-        content_type = "text/html";
-    } else if (file_path.find(".css") != std::string::npos) {
-        content_type = "text/css";
-    } else if (file_path.find(".js") != std::string::npos) {
-        content_type = "application/javascript";
-    } else if (file_path.find(".png") != std::string::npos) {
-        content_type = "image/png";
-    } else if (file_path.find(".jpg") != std::string::npos || file_path.find(".jpeg") != std::string::npos) {
-        content_type = "image/jpeg";
-    } else {
-        content_type = "application/octet-stream"; // Default for unknown types
+        // Handle static files
+        response_content = read_file(file_path); // Read the file content
+        // Adjust Content-Type based on the file type
+        if (file_path.find(".html") != std::string::npos) {
+            content_type = "text/html";
+        } else if (file_path.find(".css") != std::string::npos) {
+            content_type = "text/css";
+        } else if (file_path.find(".js") != std::string::npos) {
+            content_type = "application/javascript";
+        } else if (file_path.find(".png") != std::string::npos) {
+            content_type = "image/png";
+        } else if (file_path.find(".jpg") != std::string::npos || file_path.find(".jpeg") != std::string::npos) {
+            content_type = "image/jpeg";
+        } else {
+            content_type = "application/octet-stream"; // Default for unknown types
+        }
     }
 
     // Build the HTTP response
     std::string http_response = 
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: " + content_type + "\r\n"
-        "Content-Length: " + std::to_string(file_content.size()) + "\r\n"
+        "Content-Length: " + std::to_string(response_content.size()) + "\r\n"
         "X-Frame-Options: ALLOW\r\n"
         "X-Content-Type-Options: nosniff\r\n"
-        "\r\n" + file_content;
-    // change X-Fram-Options: ALLOW/DENY. Switch to DENY to stop people posting dodgey websites. 
-    
+        "\r\n" + response_content;
+
     // Send the response
     send(client_socket, http_response.c_str(), http_response.size(), 0);
     close(client_socket);
