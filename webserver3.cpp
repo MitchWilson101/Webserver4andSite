@@ -40,7 +40,7 @@ bool is_file(const std::string& path) {
 
 
 // To test php on server.
-    std::string execute_php(const std::string& file_path) {
+    std::string execute_php(const std::string& file_path, const std::string& post_data) {
     std::string command = "php-cgi " + file_path;
     std::string result;
     char buffer[128];
@@ -51,13 +51,13 @@ bool is_file(const std::string& path) {
         return "<h1>500 Internal Server Error</h1>";
     }
 
-    // Skip the first line (the "Content-type" header line)
-    bool is_first_line = true;
+    // Write POST data to the PHP process if available
+    if (!post_data.empty()) {
+        fwrite(post_data.c_str(), 1, post_data.size(), pipe);
+    }
+
+    // Read the output of the PHP script
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        if (is_first_line && std::string(buffer).find("Content-type:") != std::string::npos) {
-            is_first_line = false;  // Skip this line
-            continue;
-        }
         result += buffer;
     }
 
@@ -65,6 +65,7 @@ bool is_file(const std::string& path) {
     pclose(pipe);
     return result;
 }
+
 
 
 
@@ -112,7 +113,68 @@ std::string get_host_from_request(const std::string& request) {
 }
 
 
+void handle_client(int client_socket) {
+    char buffer[4096] = {0};  // Increased buffer size for larger POST data
+    read(client_socket, buffer, sizeof(buffer) - 1);
+    std::string request(buffer);
 
+    // Determine if it's a GET or POST request
+    bool is_get = request.find("GET ") == 0;
+    bool is_post = request.find("POST ") == 0;
+
+    // Extract path and query
+    size_t path_start = is_get ? 4 : 5;  // "GET /" vs "POST /"
+    size_t path_end = request.find(" ", path_start);
+    std::string request_path = request.substr(path_start, path_end - path_start);
+
+    // Set default file path
+    std::string file_path = "public/" + request_path;
+
+    // Handle POST data extraction
+    std::string post_data;
+    if (is_post) {
+        // Find the start of the POST body
+        size_t post_data_start = request.find("\r\n\r\n") + 4;
+        post_data = request.substr(post_data_start);
+    }
+
+    // Check if it's a PHP file
+    bool is_php = file_path.find(".php") != std::string::npos;
+    std::string response_content;
+    std::string content_type = "text/html";
+
+    if (is_php) {
+        if (is_post) {
+            // Use POST data with PHP
+            response_content = execute_php(file_path, post_data); // Updated execute_php to accept POST data
+        } else {
+            response_content = execute_php(file_path, "");
+        }
+    } else {
+        // Handle static files
+        response_content = read_file(file_path);
+        if (file_path.find(".html") != std::string::npos) content_type = "text/html";
+        else if (file_path.find(".css") != std::string::npos) content_type = "text/css";
+        else if (file_path.find(".js") != std::string::npos) content_type = "application/javascript";
+        else content_type = "application/octet-stream";
+    }
+
+    // Build the HTTP response
+    std::string http_response = 
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: " + content_type + "\r\n"
+        "Content-Length: " + std::to_string(response_content.size()) + "\r\n"
+        "X-Frame-Options: ALLOW\r\n"
+        "X-Content-Type-Options: nosniff\r\n"
+        "\r\n" + response_content;
+
+    // Send the response
+    send(client_socket, http_response.c_str(), http_response.size(), 0);
+    close(client_socket);
+}
+
+
+/* old php added.////////////////////////////////////////////////////////////////////////////////////////////
 void handle_client(int client_socket) {
     char buffer[1024] = {0};
     read(client_socket, buffer, 1024);
@@ -176,7 +238,7 @@ void handle_client(int client_socket) {
     send(client_socket, http_response.c_str(), http_response.size(), 0);
     close(client_socket);
 }
-
+////////////////////////////////////////////////////////////////////////////////////////////////////////////*/
 
 void handle_signal(int signal) {
     std::cout << "Shutting down server...\n";
