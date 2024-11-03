@@ -9,27 +9,38 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <cstdio>
+#include <regex>
 
 int server_socket;
 bool keep_running = true;
 
 // Helper function to remove any "../" from the path to prevent path traversal
+#include <regex>
+#include <string>
+
+#include <regex>
+#include <string>
+
 std::string sanitize_path(const std::string& path) {
     std::string sanitized_path = path;
 
-    // Remove any "../" sequences to prevent directory traversal
-    size_t pos;
-    while ((pos = sanitized_path.find("..")) != std::string::npos) {
-        sanitized_path.erase(pos, 2);
+    // Step 1: Replace multiple slashes with a single slash
+    sanitized_path = std::regex_replace(sanitized_path, std::regex("/+"), "/");
+
+    // Step 2: Reject any path containing "../" as an extra safety measure
+    if (sanitized_path.find("..") != std::string::npos) {
+        return "public/index.html";  // Redirect to a safe default if traversal is attempted
     }
 
-    // Remove any URL protocols to prevent remote file inclusion
-    if (sanitized_path.find("http://") != std::string::npos || sanitized_path.find("https://") != std::string::npos) {
-        sanitized_path = ""; // Set to empty to prevent RFI attempts
+    // Step 3: Ensure path starts with "public/"
+    if (sanitized_path.compare(0, 7, "public/") != 0) {
+        sanitized_path = "public/" + sanitized_path;
     }
 
     return sanitized_path;
 }
+
+
 
 
 // Function to check if a path is a file and exists
@@ -145,8 +156,8 @@ void handle_client(int client_socket) {
     std::string request_path = request.substr(path_start, path_end - path_start);
 
     // Set default file path
-    std::string file_path = "public/" + request_path;
-
+    //std::string file_path = "public/" + request_path;
+    std::string file_path = sanitize_path(request_path);
     // Check if file_path is a directory and default to "index.html" if it is
     struct stat path_stat;
     if (stat(file_path.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
@@ -206,73 +217,6 @@ void handle_client(int client_socket) {
 }
 
 
-
-
-/* old php added.////////////////////////////////////////////////////////////////////////////////////////////
-void handle_client(int client_socket) {
-    char buffer[1024] = {0};
-    read(client_socket, buffer, 1024);
-    std::string request(buffer);
-
-    // Verify the request contains "GET /"
-    size_t start = request.find("GET /");
-    if (start == std::string::npos) {
-        // Handle the malformed request gracefully
-        const char* bad_request_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n<h1>400 Bad Request</h1>";
-        send(client_socket, bad_request_response, strlen(bad_request_response), 0);
-        close(client_socket);
-        return;
-    }
-
-    // Extract the requested path and ignore any query parameters
-    start += 5;
-    size_t end = request.find(" ", start);
-    std::string request_path = request.substr(start, end - start);
-    
-    // Determine the file path based on the request
-    std::string file_path = "public/" + request_path;
-
-    // Check if the file is a PHP script
-    bool is_php = file_path.find(".php") != std::string::npos;
-    std::string response_content;
-    std::string content_type = "text/html";  // Default Content-Type for PHP output
-
-    if (is_php) {
-        // Execute PHP and get the output
-        response_content = execute_php(file_path); // Run PHP code using php-cgi
-    } else {
-        // Handle static files
-        response_content = read_file(file_path); // Read the file content
-        // Adjust Content-Type based on the file type
-        if (file_path.find(".html") != std::string::npos) {
-            content_type = "text/html";
-        } else if (file_path.find(".css") != std::string::npos) {
-            content_type = "text/css";
-        } else if (file_path.find(".js") != std::string::npos) {
-            content_type = "application/javascript";
-        } else if (file_path.find(".png") != std::string::npos) {
-            content_type = "image/png";
-        } else if (file_path.find(".jpg") != std::string::npos || file_path.find(".jpeg") != std::string::npos) {
-            content_type = "image/jpeg";
-        } else {
-            content_type = "application/octet-stream"; // Default for unknown types
-        }
-    }
-
-    // Build the HTTP response
-    std::string http_response = 
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: " + content_type + "\r\n"
-        "Content-Length: " + std::to_string(response_content.size()) + "\r\n"
-        "X-Frame-Options: ALLOW\r\n"
-        "X-Content-Type-Options: nosniff\r\n"
-        "\r\n" + response_content;
-
-    // Send the response
-    send(client_socket, http_response.c_str(), http_response.size(), 0);
-    close(client_socket);
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////////////*/
 
 void handle_signal(int signal) {
     std::cout << "Shutting down server...\n";
