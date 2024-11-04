@@ -15,31 +15,30 @@ int server_socket;
 bool keep_running = true;
 
 // Helper function to remove any "../" from the path to prevent path traversal
-#include <regex>
-#include <string>
-
-#include <regex>
-#include <string>
 
 std::string sanitize_path(const std::string& path) {
     std::string sanitized_path = path;
 
-    // Step 1: Replace multiple slashes with a single slash
+    // Step 1: Decode URL-encoded characters like %2e, %2f, %5c
+    sanitized_path = std::regex_replace(sanitized_path, std::regex("%2e"), ".");
+    sanitized_path = std::regex_replace(sanitized_path, std::regex("%2f"), "/");
+    sanitized_path = std::regex_replace(sanitized_path, std::regex("%5c"), "\\");
+
+    // Step 2: Replace multiple slashes with a single slash
     sanitized_path = std::regex_replace(sanitized_path, std::regex("/+"), "/");
 
-    // Step 2: Reject any path containing "../" as an extra safety measure
+    // Step 3: Reject paths containing "../" or "..\" patterns
     if (sanitized_path.find("..") != std::string::npos) {
-        return "public/index.html";  // Redirect to a safe default if traversal is attempted
+        return "public/index.html";  // Redirect to safe default file
     }
 
-    // Step 3: Ensure path starts with "public/"
+    // Step 4: Ensure path starts with "public/"
     if (sanitized_path.compare(0, 7, "public/") != 0) {
         sanitized_path = "public/" + sanitized_path;
     }
 
     return sanitized_path;
 }
-
 
 
 
@@ -76,9 +75,6 @@ bool is_file(const std::string& path) {
     pclose(pipe);
     return result;
 }
-
-
-
 
 
 bool is_internal_ip(const std::string& host) {
@@ -156,7 +152,7 @@ void handle_client(int client_socket) {
     std::string request_path = request.substr(path_start, path_end - path_start);
 
     // Set default file path
-    //std::string file_path = "public/" + request_path;
+    
     std::string file_path = sanitize_path(request_path);
     // Check if file_path is a directory and default to "index.html" if it is
     struct stat path_stat;
@@ -207,8 +203,11 @@ void handle_client(int client_socket) {
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: " + content_type + "\r\n"
         "Content-Length: " + std::to_string(response_content.size()) + "\r\n"
-        "X-Frame-Options: ALLOW\r\n"
+        "X-Frame-Options: SAMEORIGIN \r\n"
         "X-Content-Type-Options: nosniff\r\n"
+        
+        "X-XSS-Protection: 1; mode=block\r\n"
+        "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n"
         "\r\n" + response_content;
 
     // Send the response
@@ -216,7 +215,7 @@ void handle_client(int client_socket) {
     close(client_socket);
 }
 
-
+//"Content-Security-Policy: script-src 'self';\r\n"  // Allows JavaScript only from the same origin.
 
 void handle_signal(int signal) {
     std::cout << "Shutting down server...\n";
